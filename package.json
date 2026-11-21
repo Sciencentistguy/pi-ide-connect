@@ -4,7 +4,7 @@
   "description": "Pi extension implementing Claude Code's /ide protocol so Claude Code-compatible IDE extensions work with pi",
   "type": "module",
   "keywords": ["pi-package", "pi-extension", "ide", "claude-code", "mcp"],
-  "license": "MIT",
+  "license": "MPL-2.0",
   "scripts": {
     "test": "node --test --test-force-exit test/*.test.ts",
     "typecheck": "tsc --noEmit"
