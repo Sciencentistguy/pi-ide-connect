@@ -19,13 +19,13 @@ pi install /path/to/pi-ide-connect   # or: pi -e /path/to/pi-ide-connect
 | Auto-connect | On start, connects to the IDE whose workspace contains the cwd (`CLAUDE_CODE_SSE_PORT` wins, then the most specific workspace match). Reconnects with backoff. |
 | `selection_changed` | Shown in the footer; the current selection / open file is added to the model's context once per change. |
 | `at_mentioned` | Inserts `@path#L10-20` into the editor. |
-| `openDiff` / `close_tab` | `edit` and `write` open a diff in the IDE and wait for accept/reject. Accepting (including with edits made in the diff) writes the file; rejecting blocks the call and ends the turn. |
+| `openDiff` / `close_tab` | When diff review is enabled, `edit` and `write` open a diff in the IDE and wait for accept/reject. Accepting (including with edits made in the diff) writes the file; rejecting blocks the call and ends the turn. |
 | `getDiagnostics` | `ide_get_diagnostics` tool for the model. |
 | `executeCode` | `ide_execute_code` tool (only if the IDE offers it). |
 
 `/ide` selects an IDE; also `/ide <port>`, `/ide off`, `/ide status`, `/ide diff [on|off]`.
 
-Environment: `PI_IDE_AUTOCONNECT=0` disables auto-connect; `PI_IDE_DIFF=off` disables diff review.
+Environment: `PI_IDE_AUTOCONNECT=0` disables auto-connect; `PI_IDE_DIFF=on` enables diff review (off by default).
 
 ## Notes
 

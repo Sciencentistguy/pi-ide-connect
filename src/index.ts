@@ -36,7 +36,7 @@ export default function (pi: ExtensionAPI) {
 	let intentionallyDisconnected = false;
 	let reconnectTimer: NodeJS.Timeout | undefined;
 	let reconnectDelay = 1_000;
-	let diffReview = process.env.PI_IDE_DIFF !== "off";
+	let diffReview = process.env.PI_IDE_DIFF === "on";
 	let selection: Selection | undefined;
 	let injectedKey: string | undefined;
 	let toolsRegistered = false;
