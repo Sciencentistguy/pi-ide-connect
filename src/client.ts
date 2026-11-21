@@ -116,7 +116,7 @@ export class IdeClient extends EventEmitter<IdeClientEvents> {
 			const entry: Pending = { resolve, reject };
 			const onAbort = () => {
 				this.pending.delete(id);
-				reject(new Error("Aborted"));
+				entry.reject(new Error("Aborted"));
 			};
 			signal?.addEventListener("abort", onAbort, { once: true });
 			const settle = <T extends unknown[]>(fn: (...args: T) => void) => (...args: T) => {
@@ -133,7 +133,12 @@ export class IdeClient extends EventEmitter<IdeClientEvents> {
 				}, timeoutMs);
 			}
 			this.pending.set(id, entry);
-			this.send({ jsonrpc: "2.0", id, method, params });
+			try {
+				this.send({ jsonrpc: "2.0", id, method, params });
+			} catch (error) {
+				this.pending.delete(id);
+				entry.reject(error as Error);
+			}
 		});
 	}
 

@@ -121,7 +121,7 @@ export default function (pi: ExtensionAPI) {
 
 	function onNotification(method: string, params: any): void {
 		if (method === "selection_changed") {
-			selection = parseSelection(params) ?? selection;
+			selection = parseSelection(params);
 			refreshStatus();
 		} else if (method === "at_mentioned" && ctx?.hasUI && typeof params?.filePath === "string") {
 			const reference = mentionReference(ctx.cwd, params.filePath, params.lineStart, params.lineEnd);
@@ -243,7 +243,7 @@ export default function (pi: ExtensionAPI) {
 		} catch (error) {
 			openDiffs.delete(event.toolCallId);
 			if (context.signal?.aborted) {
-				await client.callTool("close_tab", { tab_name: tabName }, { timeoutMs: 2_000 }).catch(() => {});
+				await client?.callTool("close_tab", { tab_name: tabName }, { timeoutMs: 2_000 }).catch(() => {});
 				return { block: true, reason: "Cancelled while waiting for the IDE diff review." };
 			}
 			context.ui.notify(`IDE diff review failed (${(error as Error).message}); applying the change directly.`, "warning");
