@@ -1,8 +1,17 @@
 import { randomBytes } from "node:crypto";
 import { existsSync } from "node:fs";
-import { mkdir, writeFile } from "node:fs/promises";
-import { basename, dirname } from "node:path";
-import { type ExtensionAPI, type ExtensionContext, withFileMutationQueue } from "@earendil-works/pi-coding-agent";
+import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { basename, dirname, join } from "node:path";
+import {
+	DEFAULT_MAX_BYTES,
+	DEFAULT_MAX_LINES,
+	type ExtensionAPI,
+	type ExtensionContext,
+	formatSize,
+	truncateHead,
+	withFileMutationQueue,
+} from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { IdeClient, type ToolResult } from "./client.ts";
 import { proposeChange } from "./diff.ts";
@@ -27,6 +36,18 @@ function textOf(result: ToolResult): string {
 		.filter((block) => block.type === "text")
 		.map((block) => block.text ?? "")
 		.join("\n");
+}
+
+async function truncateForContext(text: string): Promise<string> {
+	const truncation = truncateHead(text, { maxLines: DEFAULT_MAX_LINES, maxBytes: DEFAULT_MAX_BYTES });
+	if (!truncation.truncated) return text;
+	const dir = await mkdtemp(join(tmpdir(), "pi-ide-"));
+	const file = join(dir, "output.txt");
+	await writeFile(file, text, "utf8");
+	return (
+		`${truncation.content}\n\n[Output truncated: ${truncation.outputLines} of ${truncation.totalLines} lines ` +
+		`(${formatSize(truncation.outputBytes)} of ${formatSize(truncation.totalBytes)}). Full output saved to: ${file}]`
+	);
 }
 
 export default function (pi: ExtensionAPI) {
@@ -93,7 +114,7 @@ export default function (pi: ExtensionAPI) {
 			async execute(_id, params, signal) {
 				if (!client?.connected) throw new Error("Not connected to an IDE. Run /ide to connect.");
 				const result = await client.callTool("getDiagnostics", params.uri ? { uri: params.uri } : {}, { signal });
-				return { content: [{ type: "text", text: textOf(result) || "[]" }], details: {}, isError: result.isError };
+				return { content: [{ type: "text", text: await truncateForContext(textOf(result) || "[]") }], details: {}, isError: result.isError };
 			},
 		});
 		pi.registerTool({
@@ -106,12 +127,15 @@ export default function (pi: ExtensionAPI) {
 			async execute(_id, params, signal) {
 				if (!client?.connected) throw new Error("Not connected to an IDE. Run /ide to connect.");
 				const result = await client.callTool("executeCode", { code: params.code }, { signal, timeoutMs: 0 });
-				return {
-					content: result.content.map((block) =>
+				const content = await Promise.all(
+					result.content.map(async (block) =>
 						block.type === "image"
 							? { type: "image" as const, data: block.data ?? "", mimeType: block.mimeType ?? "image/png" }
-							: { type: "text" as const, text: block.text ?? "" },
+							: { type: "text" as const, text: await truncateForContext(block.text ?? "") },
 					),
+				);
+				return {
+					content,
 					details: {},
 					isError: result.isError,
 				};
