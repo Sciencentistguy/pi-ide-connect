@@ -38,6 +38,29 @@ function textOf(result: ToolResult): string {
 		.join("\n");
 }
 
+function renderJson(value: unknown, indent = ""): string[] {
+	if (typeof value === "string") return value.split("\n").map((line) => indent + line);
+	if (Array.isArray(value)) {
+		return value.flatMap((item, i) => [`${indent}[${i}]`, ...renderJson(item, `${indent}  `)]);
+	}
+	if (value !== null && typeof value === "object") {
+		return Object.entries(value).flatMap(([key, item]) =>
+			typeof item === "string" && !item.includes("\n")
+				? [`${indent}${key}: ${item}`]
+				: [`${indent}${key}:`, ...renderJson(item, `${indent}  `)],
+		);
+	}
+	return [`${indent}${String(value)}`];
+}
+
+function renderAsLines(text: string): string {
+	try {
+		return renderJson(JSON.parse(text)).join("\n");
+	} catch {
+		return text;
+	}
+}
+
 async function truncateForContext(text: string): Promise<string> {
 	const truncation = truncateHead(text, { maxLines: DEFAULT_MAX_LINES, maxBytes: DEFAULT_MAX_BYTES });
 	if (!truncation.truncated) return text;
@@ -131,7 +154,7 @@ export default function (pi: ExtensionAPI) {
 					result.content.map(async (block) =>
 						block.type === "image"
 							? { type: "image" as const, data: block.data ?? "", mimeType: block.mimeType ?? "image/png" }
-							: { type: "text" as const, text: await truncateForContext(block.text ?? "") },
+							: { type: "text" as const, text: await truncateForContext(renderAsLines(block.text ?? "")) },
 					),
 				);
 				return {
