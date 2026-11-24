@@ -15,6 +15,7 @@ import {
 import { Type } from "typebox";
 import { IdeClient, type ToolResult } from "./client.ts";
 import { proposeChange } from "./diff.ts";
+import { formatDiagnostics } from "./diagnostics.ts";
 import { type IdeLock, matchingLocks, readLocks } from "./lockfiles.ts";
 import {
 	displayPath,
@@ -38,38 +39,25 @@ function textOf(result: ToolResult): string {
 		.join("\n");
 }
 
-function renderJson(value: unknown, indent = ""): string[] {
-	if (typeof value === "string") return value.split("\n").map((line) => indent + line);
-	if (Array.isArray(value)) {
-		return value.flatMap((item, i) => [`${indent}[${i}]`, ...renderJson(item, `${indent}  `)]);
-	}
-	if (value !== null && typeof value === "object") {
-		return Object.entries(value).flatMap(([key, item]) =>
-			typeof item === "string" && !item.includes("\n")
-				? [`${indent}${key}: ${item}`]
-				: [`${indent}${key}:`, ...renderJson(item, `${indent}  `)],
-		);
-	}
-	return [`${indent}${String(value)}`];
-}
-
-function renderAsLines(text: string): string {
-	try {
-		return renderJson(JSON.parse(text)).join("\n");
-	} catch {
-		return text;
-	}
+// Cuts at a UTF-8 character boundary, for a single line too long for truncateHead to keep.
+function utf8Head(text: string, maxBytes: number): string {
+	const bytes = Buffer.from(text, "utf8");
+	if (bytes.length <= maxBytes) return text;
+	let end = maxBytes;
+	while (end > 0 && (bytes[end] & 0xc0) === 0x80) end--;
+	return bytes.subarray(0, end).toString("utf8");
 }
 
 async function truncateForContext(text: string): Promise<string> {
 	const truncation = truncateHead(text, { maxLines: DEFAULT_MAX_LINES, maxBytes: DEFAULT_MAX_BYTES });
 	if (!truncation.truncated) return text;
+	const shown = truncation.firstLineExceedsLimit ? utf8Head(text, DEFAULT_MAX_BYTES) : truncation.content;
 	const dir = await mkdtemp(join(tmpdir(), "pi-ide-"));
 	const file = join(dir, "output.txt");
 	await writeFile(file, text, "utf8");
 	return (
-		`${truncation.content}\n\n[Output truncated: ${truncation.outputLines} of ${truncation.totalLines} lines ` +
-		`(${formatSize(truncation.outputBytes)} of ${formatSize(truncation.totalBytes)}). Full output saved to: ${file}]`
+		`${shown}\n\n[Output truncated: showing ${formatSize(Buffer.byteLength(shown, "utf8"))} of ` +
+		`${formatSize(truncation.totalBytes)} (${truncation.totalLines} lines). Full output saved to: ${file}]`
 	);
 }
 
@@ -126,18 +114,27 @@ export default function (pi: ExtensionAPI) {
 			name: "ide_get_diagnostics",
 			label: "IDE Diagnostics",
 			description:
-				"Get language diagnostics (errors, warnings) from the connected IDE. Omit uri to get diagnostics for all files.",
+				"Get language diagnostics (errors, warnings) from the connected IDE, one per line, most severe first. " +
+				"Omit uri to get diagnostics for every file in the workspace (files outside it are omitted). " +
+				`Output is truncated to ${DEFAULT_MAX_LINES} lines or ${formatSize(DEFAULT_MAX_BYTES)}.`,
 			promptSnippet: "Get language diagnostics from the connected IDE",
 			promptGuidelines: [
-				"Use ide_get_diagnostics after editing code to check the IDE's compiler and linter diagnostics.",
+				"Use ide_get_diagnostics with the uri of each file you edited to check the IDE's compiler and linter diagnostics.",
 			],
 			parameters: Type.Object({
 				uri: Type.Optional(Type.String({ description: "File URI (file:///...) to get diagnostics for" })),
 			}),
-			async execute(_id, params, signal) {
+			async execute(_id, params, signal, _onUpdate, context) {
 				if (!client?.connected) throw new Error("Not connected to an IDE. Run /ide to connect.");
 				const result = await client.callTool("getDiagnostics", params.uri ? { uri: params.uri } : {}, { signal });
-				return { content: [{ type: "text", text: await truncateForContext(textOf(result) || "[]") }], details: {}, isError: result.isError };
+				const raw = textOf(result) || "[]";
+				const workspaceRoots = params.uri ? undefined : [...(lock?.workspaceFolders ?? []), context.cwd];
+				const formatted = result.isError ? undefined : formatDiagnostics(raw, { cwd: context.cwd, workspaceRoots });
+				return {
+					content: [{ type: "text", text: await truncateForContext(formatted ?? raw) }],
+					details: {},
+					isError: result.isError,
+				};
 			},
 		});
 		pi.registerTool({
@@ -150,13 +147,15 @@ export default function (pi: ExtensionAPI) {
 			async execute(_id, params, signal) {
 				if (!client?.connected) throw new Error("Not connected to an IDE. Run /ide to connect.");
 				const result = await client.callTool("executeCode", { code: params.code }, { signal, timeoutMs: 0 });
-				const content = await Promise.all(
-					result.content.map(async (block) =>
-						block.type === "image"
-							? { type: "image" as const, data: block.data ?? "", mimeType: block.mimeType ?? "image/png" }
-							: { type: "text" as const, text: await truncateForContext(renderAsLines(block.text ?? "")) },
-					),
-				);
+				// Text blocks are joined so that the truncation limit applies to the whole result, not to each block.
+				const text = result.content
+					.filter((block) => block.type !== "image")
+					.map((block) => block.text ?? "")
+					.join("\n");
+				const images = result.content
+					.filter((block) => block.type === "image")
+					.map((block) => ({ type: "image" as const, data: block.data ?? "", mimeType: block.mimeType ?? "image/png" }));
+				const content = [...(text ? [{ type: "text" as const, text: await truncateForContext(text) }] : []), ...images];
 				return {
 					content,
 					details: {},
